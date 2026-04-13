@@ -1,0 +1,104 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    (function() {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const savedTheme = localStorage.getItem('theme');
+      const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', initialTheme);
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= status %> — PDF Chat</title>
+  <link rel="icon" type="image/x-icon" href="/images/favicon.ico">
+  <style>
+    :root {
+      --bg-color: #f8f9fa;
+      --text-color: #2c3e50;
+      --text-muted: #6c757d;
+      --primary-color: #0d6efd;
+      --card-bg: #ffffff;
+      --shadow-color: rgba(0, 0, 0, 0.12);
+    }
+
+    [data-theme="dark"] {
+      --bg-color: #1a1a1a;
+      --text-color: #e1e1e1;
+      --text-muted: #9ca3af;
+      --primary-color: #3b82f6;
+      --card-bg: #2d2d2d;
+      --shadow-color: rgba(0, 0, 0, 0.3);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    .error-container {
+      text-align: center;
+      padding: 2rem;
+      max-width: 480px;
+    }
+
+    .error-code {
+      font-size: 6rem;
+      font-weight: 800;
+      color: var(--primary-color);
+      line-height: 1;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.03em;
+    }
+
+    .error-message {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    .error-description {
+      color: var(--text-muted);
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 2rem;
+    }
+
+    .error-action {
+      display: inline-block;
+      padding: 0.75rem 2rem;
+      background-color: var(--primary-color);
+      color: white;
+      text-decoration: none;
+      border-radius: 0.5rem;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+
+    .error-action:hover {
+      filter: brightness(1.15);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px var(--shadow-color);
+    }
+  </style>
+</head>
+<body>
+  <div class="error-container">
+    <div class="error-code"><%= status %></div>
+    <div class="error-message"><%= message %></div>
+    <p class="error-description"><%= description %></p>
+    <a href="/" class="error-action">Go Home</a>
+  </div>
+</body>
+</html>

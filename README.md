@@ -1,166 +1,166 @@
-# PDF Chat Application
+# PDF Chat 💬📄
 
-An interactive web application that allows users to chat with their PDF documents using AI. Upload PDFs and ask questions to get contextual answers based on the document's content.
+An interactive web application that lets you **chat with your PDF documents** using AI. Upload any PDF and ask questions to get contextual, intelligent answers powered by Groq's LLM API with automatic model fallback.
 
-## Features
+## ✨ Features
 
-- 🚀 Chat with any PDF document
-- 🔒 User authentication system
-- 💾 Save chat history and conversations
-- 🌓 Dark/Light theme support
-- 📱 Responsive design
-- 🔄 Real-time PDF processing
-- 📊 Session management
-- ✨ Markdown support in chat
+- 🚀 **Chat with any PDF** — upload a document and start asking questions
+- 🤖 **Multi-model AI** — automatic fallback across Groq models (Llama 3.3 70B → Llama 4 Scout → Kimi K2 → Llama 3.1 8B)
+- 🔒 **Secure authentication** — JWT-based auth with bcrypt password hashing
+- 💾 **Persistent history** — save chat sessions and conversations (logged-in users)
+- 🌓 **Dark/Light theme** — system-aware with manual toggle
+- 📱 **Responsive design** — works on desktop and mobile
+- 📊 **Session management** — rename, switch between, and organize PDF chats
+- ✨ **Markdown rendering** — code highlighting, tables, and formatted AI responses
+- 🛡️ **Production security** — Helmet.js, rate limiting, input validation, XSS protection
 
-## Tech Stack
+## 🏗️ Tech Stack
 
-- **Frontend**: HTML, CSS, JavaScript, EJS templating
-- **Backend**: Node.js, Express.js
-- **Database**: MongoDB
-- **ML Processing**: Python, Flask
-- **Authentication**: JWT
-- **Additional Libraries**: 
-  - marked (Markdown processing)
-  - multer (File uploads)
-  - bcrypt (Password hashing)
-  - Bootstrap (UI components)
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | HTML, CSS, JavaScript, EJS, Bootstrap 5 |
+| **Backend** | Node.js, Express.js |
+| **AI Server** | Python, Flask, Groq API |
+| **Database** | MongoDB (Mongoose) |
+| **Auth** | JWT, bcrypt |
+| **PDF Processing** | pdfplumber |
+| **Security** | Helmet, express-rate-limit, express-validator |
+| **DevOps** | Docker, Docker Compose, Render |
 
-## Prerequisites
+## 📋 Prerequisites
 
-Before you begin, ensure you have the following installed:
+1. **Node.js** v18+ — [Download](https://nodejs.org/)
+2. **Python** 3.8+ — [Download](https://www.python.org/downloads/)
+3. **MongoDB** — [Download](https://www.mongodb.com/try/download/community) (default: `mongodb://localhost:27017/PDFchatbot`)
+4. **Groq API Key** — [Get one free](https://console.groq.com/keys)
 
-### Required Software
-1. **Node.js** (v14 to v18 recommended)
-   - Download: [https://nodejs.org/](https://nodejs.org/)
-   - Choose the LTS version for best compatibility
+## 🚀 Quick Start
 
-2. **Python** (v3.8 to v3.11 recommended)
-   - Download: [https://www.python.org/downloads/](https://www.python.org/downloads/)
-   - Make sure to check "Add Python to PATH" during installation
+### 1. Clone and install
 
-3. **MongoDB Community Edition**
-   - Download: [https://www.mongodb.com/try/download/community](https://www.mongodb.com/try/download/community)
-   - Important: Select "Install MongoDB Compass" during installation
-   - Default connection string will be: mongodb://localhost:27017/PDFchatbot
-
-### API Key Setup
-1. Visit [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
-2. Login/Create account to generate your API key
-3. Copy the API key and add it to your .env file as:
-```
-DEEPSEEK_API_KEY="Bearer your_api_key_here"
-```
-Note: Make sure to include the "Bearer" prefix as shown above.
-
-## Installation
-
-1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd PdfChat
-```
-
-2. Install Node.js dependencies:
-```bash
 npm install
-```
-
-3. Install Python dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file in the root directory and add your API key:
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env with your API keys and secrets
 ```
-DEEPSEEK_API_KEY="Bearer your_api_key_here"
-```
 
-Note: Make sure to include the "Bearer" prefix as shown above.
+Required variables:
+- `JWT_SECRET` — random string for JWT signing
+- `SESSION_SECRET` — random string for session encryption
+- `GROQ_API_KEY` — your Groq API key
 
-5. Ensure MongoDB is running on your system (default: mongodb://localhost:27017/PDFchatbot)
+### 3. Start MongoDB
 
-## Project Structure
+Ensure MongoDB is running on `localhost:27017` (or set `MONGODB_URI` in `.env`).
 
-- `/views` - EJS templates for rendering pages
-- `/public` - Static assets (CSS, JavaScript, images)
-- `/dbmodels` - MongoDB schema definitions
-- `/uploads` - Temporary storage for PDF uploads
-- Python files for ML processing:
-  - `deepseek_server.py` - Main ML server
-  - `ml_server.py` - Alternative ML processing
+### 4. Run the app
 
-## Running the Application
-
-1. Start the MongoDB service on your system
-
-2. Start both Node.js and Python servers:
 ```bash
 npm start
 ```
 
-This will concurrently start:
-- Node.js server on http://localhost:3000
-- Python ML server on http://localhost:5001
+This concurrently starts:
+- 🟢 **Node.js server** → http://localhost:3000
+- 🐍 **Python ML server** → http://localhost:5001
 
-## Usage
+### 5. Open your browser
 
-1. Visit http://localhost:3000 in your browser
-2. Register for an account or continue without login
-3. Upload a PDF document
-4. Start asking questions about your document
-5. (Optional) Login to save your chat history and access it later
+Visit [http://localhost:3000](http://localhost:3000) and upload a PDF!
 
-## Features in Detail
+## 🐳 Docker Deployment
 
-### For Non-logged in Users
-- Upload and chat with PDFs
-- Temporary session storage
-- Dark/Light theme switching
+```bash
+# Build and run all services
+docker compose up --build
 
-### For Logged-in Users
-- All features of non-logged in users
-- Persistent storage of PDFs and chat history
-- Rename PDFs
-- Access to previous chat sessions
-- PDF management through sidebar
+# Run in background
+docker compose up -d
+```
 
-## Development
+This spins up Node.js + Python + MongoDB automatically.
 
-- The Node.js server (`server.js`) handles routing, authentication, and database operations
-- The Python server (`deepseek_server.py`) processes PDFs and generates responses using AI
-- Chat sessions are stored in MongoDB for logged-in users and in-memory for non-logged in users
+## ☁️ Render Deployment
 
-## Error Handling
+The project includes a `render.yaml` for one-click deployment on [Render](https://render.com). Set these environment variables in the Render dashboard:
 
-The application includes comprehensive error handling for:
-- PDF processing errors
-- Authentication failures
-- Server communication issues
-- Invalid file uploads
-- Session management
+- `MONGODB_URI` — your MongoDB Atlas connection string
+- `GROQ_API_KEY` — your Groq API key
+- `DEEPSEEK_API_KEY` — (optional) OpenRouter API key
 
-## Security Features
+## 📁 Project Structure
 
-- JWT-based authentication
-- Password hashing with bcrypt
-- XSS protection
-- CSRF prevention
-- Secure cookie handling
-- Input sanitization
+```
+PdfChat/
+├── server.js              # Main Express app (entry point)
+├── deepseek_server.py     # Python Flask AI server
+├── routes/
+│   ├── auth.js            # Login, signup, logout routes
+│   └── chat.js            # Chat, upload, ask, rename routes
+├── middleware/
+│   ├── auth.js            # JWT authentication middleware
+│   ├── rateLimiter.js     # Rate limiting configuration
+│   ├── validators.js      # Input validation rules
+│   └── errorHandler.js    # 404/500 error handlers
+├── dbmodels/
+│   └── user.js            # MongoDB user + session schema
+├── views/
+│   ├── index.ejs          # Main chat interface
+│   ├── login.ejs          # Login/Signup page
+│   └── error.ejs          # Error page template
+├── public/
+│   ├── stylesheets/       # CSS files
+│   ├── javascripts/       # Client-side JS
+│   └── images/            # Static assets
+├── .env.example           # Environment variable template
+├── Dockerfile             # Node.js container
+├── Dockerfile.python      # Python container
+├── docker-compose.yml     # Full stack orchestration
+└── render.yaml            # Render deployment config
+```
 
-## Browser Support
+## 🔒 Security Features
 
-The application is tested and works on:
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
+- **Helmet.js** — HTTP security headers (CSP, HSTS, etc.)
+- **Rate limiting** — prevents brute-force and API abuse
+- **Input validation** — express-validator on all form inputs
+- **JWT authentication** — httpOnly, sameSite, secure cookies
+- **bcrypt** — password hashing with 10 salt rounds
+- **DOMPurify** — XSS prevention on rendered markdown
+- **CORS** — configurable origin restriction
+- **Graceful shutdown** — clean MongoDB disconnect on SIGTERM
 
-## Contributing
+## 🧪 API Endpoints
 
-Feel free to fork the repository and submit pull requests. For major changes, please open an issue first to discuss what you would like to change.
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/` | Redirect to `/chat` | — |
+| `GET` | `/chat` | Chat home page | Optional |
+| `GET` | `/chat/:sessionId` | Chat session page | Optional |
+| `POST` | `/upload` | Upload PDF | Optional |
+| `POST` | `/ask` | Ask question (no session) | — |
+| `POST` | `/ask/:sessionId` | Ask question in session | Optional |
+| `POST` | `/create-user` | Register new user | — |
+| `POST` | `/verify-login` | Login | — |
+| `GET` | `/logout` | Logout | — |
+| `POST` | `/rename/:sessionId` | Rename PDF session | Required |
+| `GET` | `/health` | Health check | — |
 
-## License
+## 🤝 Contributing
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

@@ -1,7 +1,7 @@
-from unittest import result
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os
+
 import pdfplumber
 import numpy as np
 import traceback
@@ -30,14 +30,8 @@ HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
-pdf_data = {
-    "text" : "",
-    "meta_info": {
-        "Title": "Unknown",
-        "Author": "Unknown",
-        "Pages": 0
-    }
-}
+# Note: pdf_data is now returned from extract_pdf_info() rather than
+# stored as global mutable state (which caused concurrency bugs).
 
 def determine_pdf_title(metadata, text):
     # 1. Check metadata title
@@ -53,31 +47,45 @@ def determine_pdf_title(metadata, text):
     return "Untitled PDF"
 
 def extract_pdf_info(pdf_path):
+    """Extract text and metadata from a PDF file.
+    Returns a new dict each call (no global state)."""
     print("[Python] Pdf Path:", pdf_path)
+    pdf_data = {
+        "text": "",
+        "meta_info": {
+            "Title": "Unknown",
+            "Author": "Unknown",
+            "Pages": 0
+        }
+    }
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             metadata = pdf.metadata or {}
             text = "\n".join([page.extract_text() or "" for page in pdf.pages])
             page_count = len(pdf.pages)
 
-        # Populate data
         pdf_data["text"] = text
         pdf_data["meta_info"]["Title"] = determine_pdf_title(metadata, text)
         pdf_data["meta_info"]["Author"] = metadata.get("Author", "Unknown")
         pdf_data["meta_info"]["Pages"] = page_count
 
-        # Safe print
-        # print(json.dumps(pdf_data, indent=2, ensure_ascii=False))
-        print (json.dumps(pdf_data["meta_info"]["Pages"], indent=2, ensure_ascii=False))
+        print(f"[Python] Extracted PDF: {pdf_data['meta_info']['Title']} ({page_count} pages)")
 
     except FileNotFoundError:
         print("[ERROR] PDF file not found.")
-    except pdfplumber.pdf.PDFSyntaxError:
-        print("[ERROR] Invalid or corrupted PDF file.")
+        raise
     except Exception as e:
         print(f"[ERROR] Failed to extract PDF info: {e}")
+        raise
 
     return pdf_data
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for load balancers and monitoring."""
+    return jsonify({"status": "ok", "service": "pdf-chat-python"})
+
 
 @app.route('/process', methods=['POST'])
 def process_pdf():
@@ -90,9 +98,9 @@ def process_pdf():
         if not pdf_path or not os.path.exists(pdf_path):
             return jsonify({"status": "error", "message": "Invalid or missing PDF path"}), 400
 
-        extract_pdf_info(pdf_path)
+        pdf_data = extract_pdf_info(pdf_path)
 
-        return jsonify({"status": "success", "message": "PDF processed successfully.", "pdf_data": pdf_data})  # ✅ ADD THIS
+        return jsonify({"status": "success", "message": "PDF processed successfully.", "pdf_data": pdf_data})
 
     except Exception as e:
         print("[ERROR] Exception in /process route:")
@@ -448,4 +456,9 @@ def query_multiple_groq(prompt, token_limits=None):
 
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)
+    is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    port = int(os.getenv('PYTHON_PORT', 5001))
+    print(f"[Python] Starting Flask server on port {port} (debug={is_debug})")
+    app.run(port=port, debug=is_debug)
+    # Production: use gunicorn instead
+    # gunicorn -w 4 -b 0.0.0.0:5001 deepseek_server:app

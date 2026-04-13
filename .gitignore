@@ -1,17 +1,46 @@
 # Python
 __pycache__/
 *.pyc
-
+*.pyo
+.Python
+env/
+venv/
+.venv/
 
 # Node
 node_modules/
+npm-debug.log*
 
-# .env
+# Environment variables (NEVER commit secrets)
 .env
+.env.local
+.env.*.local
 
 # VS Code or other IDEs
 .vscode/
+.idea/
+*.swp
+*.swo
 
-# PDF uploads (optional)
-uploads/
+# PDF uploads (temporary)
+uploads/*
+!uploads/.gitkeep
 *.pdf
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+dist/
+build/
+
+# Gemini
+.gemini/

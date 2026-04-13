@@ -1,31 +1,48 @@
 services:
-  # Node.js web server
+  # ── Node.js Web Server ───────────────────────────────────────────────────
   - type: web
     name: pdfchat-web
     env: node
-    buildCommand: npm install
-    startCommand: NODE_ENV=production node server.js
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: MONGODB_URI
-        sync: false # User needs to set this
+        sync: false # Set in Render dashboard
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false # Set in Render dashboard
       - key: DEEPSEEK_API_KEY
-        sync: false # User needs to set this
+        sync: false # Set in Render dashboard
+      - key: PYTHON_API_URL
+        fromService:
+          name: pdfchat-python
+          type: web
+          property: url
       - key: CORS_ORIGIN
         fromService:
           name: pdfchat-web
           type: web
           property: url
 
-  # Python API server
+  # ── Python API Server ────────────────────────────────────────────────────
   - type: web
     name: pdfchat-python
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python deepseek_server.py
+    plan: free
+    buildCommand: pip install -r requirements.txt gunicorn
+    startCommand: gunicorn -w 4 -b 0.0.0.0:$PORT --timeout 60 deepseek_server:app
+    healthCheckPath: /health
     envVars:
-      - key: PYTHON_PORT
-        value: 5001
+      - key: GROQ_API_KEY
+        sync: false # Set in Render dashboard
       - key: DEEPSEEK_API_KEY
-        sync: false # User needs to set this
+        sync: false # Set in Render dashboard
+      - key: HUGGINGFACE_API_KEY
+        sync: false # Set in Render dashboard

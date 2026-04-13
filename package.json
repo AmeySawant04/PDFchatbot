@@ -1,27 +1,38 @@
 {
   "name": "pdfchat",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "server.js",
+  "description": "Chat with your PDF documents using AI — upload PDFs and ask questions to get contextual answers.",
+  "author": "Amey Sawant",
+  "license": "MIT",
+  "keywords": ["pdf", "chatbot", "ai", "groq", "mongodb", "express"],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "concurrently \"npm:server\" \"npm:python\"",
+    "start:prod": "NODE_ENV=production node server.js",
+    "dev": "concurrently \"npm:server\" \"npm:python\"",
     "server": "nodemon server.js",
     "python": "python deepseek_server.py"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
     "axios": "^1.8.4",
     "bcrypt": "^5.1.1",
+    "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.1",
     "ejs": "^3.1.10",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.3.2",
     "express-session": "^1.18.1",
+    "express-validator": "^7.3.2",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "marked": "^15.0.11",
     "mongoose": "^8.13.2",
+    "morgan": "^1.10.1",
     "multer": "^1.4.5-lts.2",
     "xss": "^1.0.15"
   },

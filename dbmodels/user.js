@@ -1,79 +1,114 @@
 const mongoose = require("mongoose");
 
-mongoose.connect("mongodb://localhost:27017/PDFchatbot");
+// ── Connect to MongoDB ──────────────────────────────────────────────────────
+const mongoUri =
+  process.env.MONGODB_URI || "mongodb://localhost:27017/PDFchatbot";
 
-const sessionSchema = mongoose.Schema({
-  sessionId: {
-    type: String,
-    required: true
-  },
-  pdfData: {
-    text: {
+mongoose
+  .connect(mongoUri)
+  .then(() => console.log("[DB] Connected to MongoDB"))
+  .catch((err) => {
+    console.error("[DB] MongoDB connection error:", err.message);
+    process.exit(1);
+  });
+
+// Handle connection events
+mongoose.connection.on("error", (err) => {
+  console.error("[DB] MongoDB error:", err.message);
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.warn("[DB] MongoDB disconnected. Attempting reconnect...");
+});
+
+// ── Session Schema ──────────────────────────────────────────────────────────
+
+const sessionSchema = mongoose.Schema(
+  {
+    sessionId: {
       type: String,
       required: true,
     },
-    meta_info: {
-      Title: {
+    pdfData: {
+      text: {
         type: String,
         required: true,
       },
-      Author: {
-        type: String,
-        required: true,
+      meta_info: {
+        Title: {
+          type: String,
+          required: true,
+        },
+        Author: {
+          type: String,
+          required: true,
+        },
+        Pages: {
+          type: Number,
+          required: true,
+        },
       },
-      Pages: {
-        type: Number,
-        required: true,
-      }
-    }
-  },
-  interaction: [{
-    question: {
-      type: String,
-      required: true,
     },
-    response: {
-      type: String,
-      required: true,
-    },
-    timestamp: {
+    interaction: [
+      {
+        question: {
+          type: String,
+          required: true,
+        },
+        response: {
+          type: String,
+          required: true,
+        },
+        timestamp: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    lastInteraction: {
       type: Date,
-      default: Date.now
-    }
-  }],
-  lastInteraction: {
-    type: Date,
-    default: Date.now
-  }
-}, { timestamps: true });
+      default: Date.now,
+    },
+  },
+  { timestamps: true }
+);
 
-const userSchema = mongoose.Schema({
-  fullName: {
-    type: String,
-    required: true,
+// ── User Schema ─────────────────────────────────────────────────────────────
+
+const userSchema = mongoose.Schema(
+  {
+    fullName: {
+      type: String,
+      required: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: true,
+    },
+    session: [sessionSchema],
   },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-  },
-  password: {
-    type: String,
-    required: true,
-  },
-  session: [sessionSchema],
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // Only index sessionId, email is already indexed due to unique constraint
 userSchema.index({ "session.sessionId": 1 });
 
 const User = mongoose.model("user", userSchema);
 
-// Run this once to ensure indexes are created
-User.createIndexes().then(() => {
-  console.log("Database indexes ensured");
-}).catch(err => {
-  console.error("Error creating indexes:", err);
-});
+// Ensure indexes are created
+User.createIndexes()
+  .then(() => {
+    console.log("[DB] Database indexes ensured");
+  })
+  .catch((err) => {
+    console.error("[DB] Error creating indexes:", err);
+  });
 
 module.exports = User;

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # ── Node.js Express Server ─────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - PYTHON_API_URL=http://python:5001
+    env_file:
+      - .env
+    depends_on:
+      python:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+
+  # ── Python ML Server ───────────────────────────────────────────────────────
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    ports:
+      - "5001:5001"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  uploads:
