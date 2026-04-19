@@ -169,16 +169,20 @@
         const data = await res.json();
         
         if (data.success && data.redirect) {
+          if (data.migrated) {
+            showLoading(signupBtn, "Migrating your session...");
+          }
           window.location.href = data.redirect;
         } else if (data.redirect) {
           window.location.href = data.redirect;
         } else if (data.error) {
           alert(data.error);
+          signupBtn.disabled = false;
+          signupBtn.innerHTML = "Sign Up";
         }
       } catch (err) {
         console.error("Signup Error:", err);
         alert("Failed to signup. Please try again.");
-      } finally {
         signupBtn.disabled = false;
         signupBtn.innerHTML = "Sign Up";
       }
@@ -206,16 +210,20 @@
         const data = await res.json();
         
         if (data.success && data.redirect) {
+          if (data.migrated) {
+            showLoading(loginBtn, "Migrating your session...");
+          }
           window.location.href = data.redirect;
         } else if (data.redirect) {
           window.location.href = data.redirect;
         } else if (data.error) {
           alert(data.error);
+          loginBtn.disabled = false;
+          loginBtn.innerHTML = "Login";
         }
       } catch (err) {
         console.error("Login Error:", err);
         alert("Failed to login. Please try again.");
-      } finally {
         loginBtn.disabled = false;
         loginBtn.innerHTML = "Login";
       }

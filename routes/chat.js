@@ -415,6 +415,11 @@ apiRouter.post(
         });
       } else {
         // For non-logged in users, store PDF data in express-session
+        // Enforce 1 active guest session — delete old one if it exists
+        if (req.session.guestSessionId) {
+          delete req.session[req.session.guestSessionId];
+        }
+
         req.session[sessionId] = {
           pdfData: {
             text: pdfData.text,
@@ -426,6 +431,9 @@ apiRouter.post(
           },
           interaction: [],
         };
+
+        // Track the single guest session ID for migration on login
+        req.session.guestSessionId = sessionId;
 
         res.json({
           message: "PDF processed successfully!",

@@ -81,6 +81,27 @@
     .action-buttons { margin-top: auto; padding: 1rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
     .action-btn { display: flex; align-items: center; justify-content: center; padding: 0.75rem; border-radius: 0.5rem; font-weight: 500; text-decoration: none; border: none; -webkit-tap-highlight-color: transparent; }
 
+    /* Circular Progress Indicator */
+    #uploadProgress {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 2rem; gap: 1rem;
+    }
+    .progress-circle-wrapper { position: relative; width: 120px; height: 120px; }
+    .progress-circle { display: block; }
+    .progress-bg { stroke: rgba(128,128,128,0.2); }
+    .progress-bar {
+      stroke: #0d6efd; transition: stroke-dashoffset 0.15s ease;
+    }
+    .progress-text {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1.5rem; font-weight: 700; color: #0d6efd;
+    }
+    .progress-stage {
+      font-size: 0.95rem; font-weight: 500; opacity: 0.8;
+      text-align: center; min-height: 1.4em;
+    }
+
     /* === MOBILE === */
     @media (max-width: 768px) {
       .main-content { margin-left: 0 !important; width: 100%; padding: 0.5rem; padding-top: 3.5rem; }
@@ -228,13 +249,28 @@
 
       <!-- Upload Form - Show only on /chat route for non-logged in users or when no session is active -->
       <% if(!sessionId) { %>
-        <div class="upload-section mb-4">
+        <div class="upload-section mb-4" id="uploadSection">
           <form id="uploadForm" enctype="multipart/form-data">
             <div class="upload-container">
               <input type="file" name="pdf" accept=".pdf" class="form-control" required />
               <button type="submit" class="btn btn-primary upload-btn">Upload PDF</button>
             </div>
           </form>
+
+          <!-- Circular Progress Overlay (hidden by default) -->
+          <div id="uploadProgress" style="display:none">
+            <div class="progress-circle-wrapper">
+              <svg class="progress-circle" width="120" height="120" viewBox="0 0 120 120">
+                <circle class="progress-bg" cx="60" cy="60" r="52" fill="none" stroke-width="8" />
+                <circle class="progress-bar" id="progressBar" cx="60" cy="60" r="52"
+                  fill="none" stroke-width="8" stroke-linecap="round"
+                  stroke-dasharray="326.73" stroke-dashoffset="326.73"
+                  transform="rotate(-90 60 60)" />
+              </svg>
+              <div class="progress-text" id="progressText">0%</div>
+            </div>
+            <div class="progress-stage" id="progressStage">Preparing...</div>
+          </div>
         </div>
       <% } %>
       
@@ -330,42 +366,127 @@
       }, 3000);
     }
 
-    document.getElementById('uploadForm')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      const submitBtn = e.target.querySelector('button');
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Uploading...';
-      
-      try {
-        const res = await fetch('/api/v1/upload', {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!res.ok) throw new Error('Upload failed');
-        
-        const data = await res.json();
-        
-        // Show success message
-        showSuccessAlert(`PDF "${data.title || 'Document'}" processed successfully! Ready to chat.`);
-        
-        // Wait a moment to show the success message before redirecting
-        setTimeout(() => {
-          if (data.sessionId) {
-            window.location.href = `/chat/${data.sessionId}`;
-          } else {
-            window.location.reload();
+    // ── Circular Progress Helpers ─────────────────────────────────────
+    const CIRCUMFERENCE = 2 * Math.PI * 52; // 326.73
+
+    function setProgress(percent, stageText) {
+      const bar = document.getElementById('progressBar');
+      const text = document.getElementById('progressText');
+      const stage = document.getElementById('progressStage');
+      if (!bar) return;
+
+      const clamped = Math.min(100, Math.max(0, percent));
+      const offset = CIRCUMFERENCE - (clamped / 100) * CIRCUMFERENCE;
+      bar.style.strokeDashoffset = offset;
+      text.textContent = Math.round(clamped) + '%';
+      if (stageText) stage.textContent = stageText;
+    }
+
+    // Stage-based animation for server processing (40% → target%)
+    let stageInterval = null;
+    function animateToStage(targetPercent, stageText, duration) {
+      return new Promise(resolve => {
+        const bar = document.getElementById('progressBar');
+        const currentOffset = parseFloat(bar.style.strokeDashoffset || CIRCUMFERENCE);
+        const currentPercent = ((CIRCUMFERENCE - currentOffset) / CIRCUMFERENCE) * 100;
+        const startPercent = currentPercent;
+        const startTime = Date.now();
+
+        if (stageInterval) clearInterval(stageInterval);
+        stageInterval = setInterval(() => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(1, elapsed / duration);
+          const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+          const currentPct = startPercent + (targetPercent - startPercent) * eased;
+          setProgress(currentPct, stageText);
+
+          if (progress >= 1) {
+            clearInterval(stageInterval);
+            stageInterval = null;
+            resolve();
           }
-        }, 1500);
-        
-      } catch (err) {
-        console.error('Upload error:', err);
-        alert('Failed to upload PDF: ' + err.message);
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Upload PDF';
-      }
+        }, 50);
+      });
+    }
+
+    // ── Upload Handler ───────────────────────────────────────────────
+    document.getElementById('uploadForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const formData = new FormData(form);
+      const progressEl = document.getElementById('uploadProgress');
+      
+      // Hide upload form, show progress
+      form.style.display = 'none';
+      progressEl.style.display = 'flex';
+      setProgress(0, 'Uploading PDF...');
+
+      const xhr = new XMLHttpRequest();
+
+      // Real upload progress (0% → 40%)
+      xhr.upload.addEventListener('progress', (ev) => {
+        if (ev.lengthComputable) {
+          const uploadPercent = (ev.loaded / ev.total) * 40; // 0-40%
+          setProgress(uploadPercent, 'Uploading PDF...');
+        }
+      });
+
+      // Upload complete — start stage-based animation for server processing
+      xhr.upload.addEventListener('load', async () => {
+        setProgress(40, 'Extracting text...');
+        await animateToStage(55, 'Extracting text...', 3000);
+        await animateToStage(70, 'Running OCR on images...', 5000);
+        await animateToStage(85, 'Generating embeddings...', 4000);
+        animateToStage(92, 'Almost done...', 10000); // slow crawl until response
+      });
+
+      // Server response
+      xhr.addEventListener('load', () => {
+        if (stageInterval) { clearInterval(stageInterval); stageInterval = null; }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            setProgress(100, 'Done!');
+            showSuccessAlert(`PDF "${data.title || 'Document'}" processed successfully!`);
+
+            setTimeout(() => {
+              if (data.sessionId) {
+                window.location.href = `/chat/${data.sessionId}`;
+              } else {
+                window.location.reload();
+              }
+            }, 800);
+          } catch (err) {
+            resetUpload(form, progressEl, 'Failed to parse server response');
+          }
+        } else {
+          let msg = 'Upload failed';
+          try { msg = JSON.parse(xhr.responseText).error || msg; } catch(_) {}
+          resetUpload(form, progressEl, msg);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        if (stageInterval) { clearInterval(stageInterval); stageInterval = null; }
+        resetUpload(form, progressEl, 'Network error during upload');
+      });
+
+      xhr.addEventListener('timeout', () => {
+        if (stageInterval) { clearInterval(stageInterval); stageInterval = null; }
+        resetUpload(form, progressEl, 'Upload timed out');
+      });
+
+      xhr.open('POST', '/api/v1/upload');
+      xhr.timeout = 120000; // 2 min timeout for large PDFs + OCR
+      xhr.send(formData);
     });
+
+    function resetUpload(form, progressEl, errorMsg) {
+      alert('Failed to upload PDF: ' + errorMsg);
+      progressEl.style.display = 'none';
+      form.style.display = '';
+    }
   </script>
 
   <!-- Bootstrap JS -->

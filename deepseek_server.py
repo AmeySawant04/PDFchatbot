@@ -4,6 +4,7 @@ from flask_cors import CORS
 
 import pdfplumber
 import numpy as np
+from PIL import Image
 import traceback
 import requests, time
 import json
@@ -17,6 +18,19 @@ from services.chunking import ChunkingService, encode_embeddings, decode_embeddi
 load_dotenv()  # Add this near the top of your file
 
 sys.stdout.reconfigure(encoding='utf-8') #make output on console error free (mostly)
+
+# ── Lazy-loaded OCR reader (English only, CPU mode) ─────────────────────────
+_ocr_reader = None
+
+def _get_ocr_reader():
+    """Lazy-load the EasyOCR reader to avoid import-time overhead (~5s first run)."""
+    global _ocr_reader
+    if _ocr_reader is None:
+        import easyocr
+        print("[OCR] Loading EasyOCR reader (English)...")
+        _ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        print("[OCR] EasyOCR reader loaded successfully")
+    return _ocr_reader
 
 
 app = Flask(__name__)
@@ -50,7 +64,7 @@ def determine_pdf_title(metadata, text):
     return "Untitled PDF"
 
 def extract_pdf_info(pdf_path):
-    """Extract text and metadata from a PDF file.
+    """Extract text, metadata, and OCR content from a PDF file.
     Returns a new dict each call (no global state)."""
     print("[Python] Pdf Path:", pdf_path)
     pdf_data = {
@@ -67,6 +81,60 @@ def extract_pdf_info(pdf_path):
             metadata = pdf.metadata or {}
             text = "\n".join([page.extract_text() or "" for page in pdf.pages])
             page_count = len(pdf.pages)
+
+            # ── OCR: extract text from images in each page ───────────────
+            ocr_texts = []
+            for page_num, page in enumerate(pdf.pages):
+                images = page.images
+                if not images:
+                    continue
+
+                try:
+                    # Render page to PIL image at 200 DPI
+                    page_image = page.to_image(resolution=200).original
+
+                    for img_info in images:
+                        try:
+                            # Crop the image region using bounding box
+                            bbox = (
+                                img_info['x0'],
+                                img_info['top'],
+                                img_info['x1'],
+                                img_info['bottom']
+                            )
+                            cropped = page_image.crop(bbox)
+
+                            # Skip very small images (likely decorative)
+                            if cropped.width < 50 or cropped.height < 50:
+                                continue
+
+                            # Run OCR on the cropped image
+                            reader = _get_ocr_reader()
+                            results = reader.readtext(
+                                np.array(cropped),
+                                detail=0,
+                                paragraph=True
+                            )
+
+                            if results:
+                                ocr_text = ' '.join(results)
+                                ocr_texts.append(
+                                    f"[Image on page {page_num + 1}]: {ocr_text}"
+                                )
+                        except Exception as img_err:
+                            print(f"[OCR] Skipping image on page {page_num + 1}: {img_err}")
+                            continue
+
+                except Exception as page_err:
+                    print(f"[OCR] Skipping page {page_num + 1} images: {page_err}")
+                    continue
+
+            if ocr_texts:
+                print(f"[OCR] Extracted text from {len(ocr_texts)} images")
+                combined_ocr = "\n\n".join(ocr_texts)
+                text = text + "\n\n--- OCR Extracted Content ---\n\n" + combined_ocr
+            else:
+                print("[OCR] No images with extractable text found")
 
         pdf_data["text"] = text
         pdf_data["meta_info"]["Title"] = determine_pdf_title(metadata, text)
@@ -126,6 +194,39 @@ def process_pdf():
 
     except Exception as e:
         print("[ERROR] Exception in /process route:")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@app.route('/chunk-text', methods=['POST'])
+def chunk_text_endpoint():
+    """Chunk and embed pre-extracted text (for guest session migration).
+    Accepts raw text, returns chunks + encoded embeddings."""
+    try:
+        data = request.json
+        text = data.get('text', '')
+
+        if not text or not text.strip():
+            return jsonify({"status": "error", "message": "No text provided"}), 400
+
+        print(f"[Python] /chunk-text called, text length: {len(text)} chars")
+
+        chunker = ChunkingService()
+        chunks = chunker.chunk_text(text, chunk_size=512, overlap=50)
+        print(f"[Python] Text chunked into {len(chunks)} chunks")
+
+        embeddings = chunker.embed_chunks(chunks)
+        encoded = encode_embeddings(embeddings)
+        print(f"[Python] Embeddings generated, encoded size: {len(encoded)} chars")
+
+        return jsonify({
+            "status": "success",
+            "chunks": chunks,
+            "embeddings": encoded
+        })
+
+    except Exception as e:
+        print("[ERROR] Exception in /chunk-text route:")
         traceback.print_exc()
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 

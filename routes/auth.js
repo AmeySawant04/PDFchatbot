@@ -9,6 +9,7 @@ const {
   loginValidation,
   handleValidationErrors,
 } = require("../middleware/validators");
+const { migrateGuestSession } = require("../services/sessionMigration");
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGE ROUTES — mounted at "/" in server.js
@@ -53,7 +54,7 @@ apiRouter.post(
       const hash = await bcrypt.hash(password, salt);
 
       // Create user FIRST, then set cookie
-      await userModel.create({
+      const newUser = await userModel.create({
         fullName,
         email,
         password: hash,
@@ -61,7 +62,16 @@ apiRouter.post(
 
       // Set auth cookie after user is confirmed created
       setAuthCookie(res, email);
-      res.status(201).json({ success: true, redirect: "/" });
+
+      // Migrate guest session if one exists
+      const migratedSessionId = await migrateGuestSession(req, newUser);
+      const redirect = migratedSessionId ? `/chat/${migratedSessionId}` : "/";
+
+      res.status(201).json({
+        success: true,
+        redirect,
+        migrated: !!migratedSessionId,
+      });
     } catch (e) {
       console.error("[Auth] Error creating user:", e.message);
       res.status(500).json({ error: "Failed to create account. Please try again." });
@@ -88,7 +98,16 @@ apiRouter.post(
       const isMatch = await bcrypt.compare(password, existingUser.password);
       if (isMatch) {
         setAuthCookie(res, email);
-        return res.status(200).json({ success: true, redirect: "/" });
+
+        // Migrate guest session if one exists
+        const migratedSessionId = await migrateGuestSession(req, existingUser);
+        const redirect = migratedSessionId ? `/chat/${migratedSessionId}` : "/";
+
+        return res.status(200).json({
+          success: true,
+          redirect,
+          migrated: !!migratedSessionId,
+        });
       } else {
         return res.status(401).json({ error: "Email or Password incorrect", redirect: "/login/2" });
       }
