@@ -2,6 +2,7 @@
     // Global state
     let isAutoScrollEnabled = true;
     let chatHistory = [];
+    const MAX_HISTORY_PAIRS = 10; // Max Q&A pairs kept in memory (10 pairs = 20 messages)
     const tokenLimits = {
       systemPrompt: Math.floor(128000 * 0.02),
       userQuestion: Math.floor(128000 * 0.24),
@@ -69,68 +70,93 @@
     function initializeSidebar() {
       const sidebarToggle = document.getElementById('sidebarToggle');
       const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebarOverlay');
       const mainContent = document.querySelector('.main-content');
       
-      if (sidebarToggle && sidebar && mainContent) {
-        // Check if it's the first visit
-        const hasVisitedBefore = localStorage.getItem('hasVisitedBefore');
-        
-        // Function to check if device is mobile
-        const isMobile = () => window.innerWidth <= 768;
-        
-        // Set initial state based on device
-        if (!hasVisitedBefore) {
-          const shouldCollapseInitially = isMobile();
-          if (shouldCollapseInitially) {
-            sidebar.classList.add('collapsed');
-            mainContent.classList.add('full-width');
-          }
-          localStorage.setItem('hasVisitedBefore', 'true');
-          localStorage.setItem('sidebarCollapsed', shouldCollapseInitially);
-        } else {
-          // Load saved state
-          const savedCollapsedState = localStorage.getItem('sidebarCollapsed') === 'true';
-          if (savedCollapsedState) {
-            sidebar.classList.add('collapsed');
-            mainContent.classList.add('full-width');
-          }
+      if (!sidebarToggle || !sidebar || !mainContent) return;
+
+      const isMobile = () => window.innerWidth <= 768;
+
+      // Helper: collapse sidebar + hide overlay
+      function collapseSidebar() {
+        sidebar.classList.add('collapsed');
+        mainContent.classList.add('full-width');
+        if (overlay) overlay.classList.remove('active');
+        if (!isMobile()) {
+          localStorage.setItem('sidebarCollapsed', 'true');
         }
+      }
 
-        // Toggle handler
-        sidebarToggle.addEventListener('click', () => {
-          sidebar.classList.toggle('collapsed');
-          mainContent.classList.toggle('full-width');
-          localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
-        });
+      // Helper: expand sidebar + show overlay on mobile
+      function expandSidebar() {
+        sidebar.classList.remove('collapsed');
+        mainContent.classList.remove('full-width');
+        if (isMobile() && overlay) overlay.classList.add('active');
+        if (!isMobile()) {
+          localStorage.setItem('sidebarCollapsed', 'false');
+        }
+      }
 
-        // Add click handlers to PDF/chat links in sidebar for mobile
-        const pdfLinks = document.querySelectorAll('#pdfList .list-group-item a');
-        pdfLinks.forEach(link => {
-          link.addEventListener('click', (e) => {
-            if (isMobile()) {
-              // Only collapse sidebar on mobile
-              sidebar.classList.add('collapsed');
-              mainContent.classList.add('full-width');
-              localStorage.setItem('sidebarCollapsed', true);
-            }
-          });
-        });
+      // Set initial state
+      if (isMobile()) {
+        // Mobile: always start collapsed
+        collapseSidebar();
+      } else {
+        // Desktop: restore saved state
+        const savedCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (savedCollapsed) {
+          collapseSidebar();
+        }
+      }
 
-        // Handle resize events
-        window.addEventListener('resize', () => {
-          if (!hasVisitedBefore) {
-            const shouldCollapse = isMobile();
-            if (shouldCollapse) {
-              sidebar.classList.add('collapsed');
-              mainContent.classList.add('full-width');
-            } else {
-              sidebar.classList.remove('collapsed');
-              mainContent.classList.remove('full-width');
-            }
-            localStorage.setItem('sidebarCollapsed', shouldCollapse);
-          }
+      // Toggle handler
+      sidebarToggle.addEventListener('click', () => {
+        const isCollapsed = sidebar.classList.contains('collapsed');
+        if (isCollapsed) {
+          expandSidebar();
+        } else {
+          collapseSidebar();
+        }
+      });
+
+      // Overlay tap-to-dismiss (mobile)
+      if (overlay) {
+        overlay.addEventListener('click', () => {
+          collapseSidebar();
         });
       }
+
+      // Auto-close sidebar when clicking a chat link on mobile
+      const pdfLinks = document.querySelectorAll('#pdfList .list-group-item a');
+      pdfLinks.forEach(link => {
+        link.addEventListener('click', () => {
+          if (isMobile()) {
+            collapseSidebar();
+          }
+        });
+      });
+
+      // Handle resize: mobile ↔ desktop transitions
+      let wasMobile = isMobile();
+      window.addEventListener('resize', () => {
+        const nowMobile = isMobile();
+        if (wasMobile !== nowMobile) {
+          if (nowMobile) {
+            // Switched to mobile → collapse and hide overlay
+            collapseSidebar();
+          } else {
+            // Switched to desktop → restore saved state, remove overlay
+            if (overlay) overlay.classList.remove('active');
+            const savedCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+            if (savedCollapsed) {
+              collapseSidebar();
+            } else {
+              expandSidebar();
+            }
+          }
+          wasMobile = nowMobile;
+        }
+      });
     }
 
     // Initialize rename functionality
@@ -165,7 +191,7 @@
           const newTitle = newTitleInput.value;
 
           try {
-            const res = await fetch(`/rename/${sessionId}`, {
+            const res = await fetch(`/api/v1/rename/${sessionId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ newTitle })
@@ -363,7 +389,7 @@
         questionInput.focus();
 
         // Send request
-        const res = await fetch(`/ask/${sessionId}`, {
+        const res = await fetch(`/api/v1/ask/${sessionId}`, {
           method: "POST",
           credentials: 'include',
           headers: { "Content-Type": "application/json" },
@@ -394,6 +420,20 @@
         // Update history
         chatHistory.push({ role: "user", content: question });
         chatHistory.push({ role: "assistant", content: data.answer });
+
+        // Sliding window: trim oldest entries if over pair limit
+        if (chatHistory.length > MAX_HISTORY_PAIRS * 2) {
+          chatHistory = chatHistory.slice(-MAX_HISTORY_PAIRS * 2);
+        }
+
+        // Character budget check against tokenLimits.chatHistory
+        const charBudget = tokenLimits.chatHistory;
+        let totalChars = chatHistory.reduce((sum, msg) => sum + msg.content.length, 0);
+        while (totalChars > charBudget && chatHistory.length > 2) {
+          // Remove oldest pair (2 messages)
+          chatHistory.splice(0, 2);
+          totalChars = chatHistory.reduce((sum, msg) => sum + msg.content.length, 0);
+        }
 
         // Update sidebar order immediately
         const pdfList = document.getElementById('pdfList');

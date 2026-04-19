@@ -22,8 +22,15 @@ const compression = require("compression");
 const morgan = require("morgan");
 
 // ── Route imports ───────────────────────────────────────────────────────────
-const authRoutes = require("./routes/auth");
-const chatRoutes = require("./routes/chat");
+const {
+  pageRouter: authPageRoutes,
+  apiRouter: authApiRoutes,
+} = require("./routes/auth");
+const {
+  pageRouter: chatPageRoutes,
+  apiRouter: chatApiRoutes,
+} = require("./routes/chat");
+const legacyRedirects = require("./routes/legacy");
 
 // ── Middleware imports ──────────────────────────────────────────────────────
 const { generalLimiter } = require("./middleware/rateLimiter");
@@ -31,6 +38,7 @@ const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 
 // ── Database migration utility ──────────────────────────────────────────────
 const userModel = require("./dbmodels/user");
+const PdfContent = require("./dbmodels/pdfContent");
 
 async function migrateSessions() {
   try {
@@ -48,16 +56,19 @@ async function migrateSessions() {
       }
 
       // Filter out any invalid sessions and add sessionId where missing
+      // Sessions are valid if they have pdfData.meta_info OR pdfContent ref
       user.session = user.session
         .filter((session) => {
-          return session && session.pdfData && session.pdfData.meta_info;
+          const hasMetaInfo =
+            session && session.pdfData && session.pdfData.meta_info;
+          const hasPdfContentRef = session && session.pdfContent;
+          return hasMetaInfo || hasPdfContentRef;
         })
         .map((session) => {
           if (!session.sessionId) {
             needsUpdate = true;
             const sessionId =
-              Date.now().toString(36) +
-              Math.random().toString(36).substring(2);
+              Date.now().toString(36) + Math.random().toString(36).substring(2);
             return {
               ...session.toObject(),
               sessionId,
@@ -69,11 +80,11 @@ async function migrateSessions() {
 
       if (needsUpdate) {
         console.log(
-          `[Migration] Updating user ${user.email} with ${user.session.length} sessions`
+          `[Migration] Updating user ${user.email} with ${user.session.length} sessions`,
         );
         await userModel.updateOne(
           { _id: user._id },
-          { $set: { session: user.session } }
+          { $set: { session: user.session } },
         );
       }
     }
@@ -87,6 +98,14 @@ async function migrateSessions() {
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 3000;
+
+// ── Static Assets (served FIRST — no middleware interference on CSS/JS/images) ──
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    maxAge: isProduction ? "7d" : 0,
+    etag: true,
+  }),
+);
 
 // ── Security Middleware ─────────────────────────────────────────────────────
 app.use(
@@ -117,7 +136,9 @@ app.use(
         connectSrc: ["'self'", "cdn.jsdelivr.net", "cdnjs.cloudflare.com"],
       },
     },
-  })
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
+  }),
 );
 
 // ── CORS ────────────────────────────────────────────────────────────────────
@@ -126,7 +147,7 @@ app.use(
   cors({
     origin: corsOrigin,
     credentials: true,
-  })
+  }),
 );
 
 // ── General Middleware ───────────────────────────────────────────────────────
@@ -135,7 +156,7 @@ app.use(morgan(isProduction ? "combined" : "dev")); // Request logging
 app.use(express.json({ limit: "10mb" })); // JSON body parser with size limit
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
-app.use(generalLimiter); // Global rate limiter
+app.use(generalLimiter);
 
 // ── Session ─────────────────────────────────────────────────────────────────
 app.use(
@@ -149,20 +170,12 @@ app.use(
       sameSite: "Strict",
       maxAge: 24 * 60 * 60 * 1000, // 24 hours for guest sessions
     },
-  })
+  }),
 );
 
 // ── View Engine ─────────────────────────────────────────────────────────────
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
-
-// ── Static Assets (with caching in production) ─────────────────────────────
-app.use(
-  express.static(path.join(__dirname, "public"), {
-    maxAge: isProduction ? "7d" : 0, // Cache static assets for 7 days in production
-    etag: true,
-  })
-);
 
 // ── Health Check ────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
@@ -175,8 +188,16 @@ app.get("/health", (req, res) => {
 });
 
 // ── Routes ──────────────────────────────────────────────────────────────────
-app.use("/", authRoutes);
-app.use("/", chatRoutes);
+// Page routes (serve HTML) — no versioning needed
+app.use("/", authPageRoutes); // GET /login, GET /login/:status
+app.use("/", chatPageRoutes); // GET /, GET /chat, GET /chat/:sessionId
+
+// Versioned API routes
+app.use("/api/v1", chatApiRoutes); // Rate-limit API only (not HTML/static assets)
+app.use("/api/v1/auth", authApiRoutes); // POST /api/v1/auth/create-user, etc.
+
+// Legacy backward-compat redirects (old routes → versioned routes via 308)
+app.use("/", legacyRedirects);
 
 // ── Error Handling ──────────────────────────────────────────────────────────
 app.use(notFoundHandler);
@@ -208,7 +229,9 @@ migrateSessions().then(() => {
   console.log("[Migration] Session migration completed");
   server = app.listen(PORT, () => {
     console.log(`[Server] PDF Chat running on http://localhost:${PORT}`);
-    console.log(`[Server] Environment: ${process.env.NODE_ENV || "development"}`);
+    console.log(
+      `[Server] Environment: ${process.env.NODE_ENV || "development"}`,
+    );
   });
 
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

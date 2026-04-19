@@ -16,7 +16,100 @@
   <title>PDF Chat</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico">
-  <link rel="stylesheet" href="/stylesheets/index.css">
+
+  <!-- Critical inline styles: guaranteed to work on all devices -->
+  <style>
+    /* Base layout */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
+
+    /* Theme toggle - fixed top-right */
+    .theme-toggle {
+      position: fixed; top: 1rem; right: 1rem; z-index: 1050;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #0d6efd; color: white; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Sidebar toggle - fixed top-left, hidden by default (JS shows for logged-in users) */
+    .toggle-sidebar-btn {
+      position: fixed; top: 1rem; left: 1rem; z-index: 1050;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #0d6efd; color: white; border: none; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      font-size: 1.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Sidebar */
+    .sidebar-container {
+      position: fixed; top: 0; left: 0; width: 250px; height: 100vh;
+      z-index: 1040; display: none; flex-direction: column;
+      transform: translateX(0); transition: transform 0.3s ease;
+      overflow-y: auto;
+    }
+    .sidebar-container.collapsed { transform: translateX(-100%); }
+    .sidebar-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); z-index: 1035; opacity: 0;
+      transition: opacity 0.3s ease; pointer-events: none;
+    }
+    .sidebar-overlay.active { opacity: 1; pointer-events: auto; }
+
+    /* Main content */
+    .main-content { margin-left: 250px; min-height: 100vh; padding: 1rem; transition: margin-left 0.3s ease; }
+    .main-content.full-width { margin-left: 0; width: 100%; }
+
+    /* Upload section */
+    .upload-section { border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.12); }
+    .upload-container { display: flex; gap: 1rem; align-items: center; }
+    .upload-container input[type="file"] { flex: 1; min-width: 0; border-radius: 0.5rem; padding: 0.75rem; }
+    .upload-container .upload-btn { white-space: nowrap; flex-shrink: 0; }
+
+    /* Chat */
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); position: relative; overflow: hidden; border-radius: 0.5rem; width: 100%; }
+    #chatBox { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .chat-messages-container { flex: 1; overflow-y: auto; padding: 1rem; -webkit-overflow-scrolling: touch; }
+    .chat-input-container { flex-shrink: 0; padding: 1rem; position: sticky; bottom: 0; z-index: 10; }
+    .user-message, .ai-response { padding: 1rem 1.25rem; margin: 0.75rem 1rem; border-radius: 1.2rem; max-width: 85%; word-wrap: break-word; overflow-wrap: break-word; }
+    .user-message { margin-left: auto; }
+    .ai-response { margin-right: auto; line-height: 1.6; }
+
+    /* Action buttons */
+    .action-buttons { margin-top: auto; padding: 1rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
+    .action-btn { display: flex; align-items: center; justify-content: center; padding: 0.75rem; border-radius: 0.5rem; font-weight: 500; text-decoration: none; border: none; -webkit-tap-highlight-color: transparent; }
+
+    /* === MOBILE === */
+    @media (max-width: 768px) {
+      .main-content { margin-left: 0 !important; width: 100%; padding: 0.5rem; padding-top: 3.5rem; }
+      .sidebar-container { width: 85vw; max-width: 320px; }
+      .sidebar-overlay { display: block; }
+      .theme-toggle { top: 0.75rem; right: 0.75rem; width: 36px; height: 36px; font-size: 1.1rem; }
+      .toggle-sidebar-btn { top: 0.75rem; left: 0.75rem; width: 36px; height: 36px; font-size: 1.1rem; }
+      .chat-container { height: calc(100vh - 4.5rem); border-radius: 0; }
+      .chat-messages-container { padding: 0.75rem; }
+      .user-message, .ai-response { padding: 0.75rem 1rem; margin: 0.5rem 0.5rem; max-width: 92%; font-size: 0.95rem; }
+      .chat-input-container { padding: 0.5rem; }
+      #question { font-size: 16px; }
+      .upload-section { padding: 1rem; border-radius: 0.75rem; }
+      .upload-container { flex-direction: column; gap: 0.75rem; }
+      .upload-container input[type="file"] { width: 100%; font-size: 0.9rem; }
+      .upload-container .upload-btn { width: 100%; }
+      .modal-footer { flex-direction: column; gap: 0.5rem; }
+      .modal-footer .btn { width: 100%; }
+    }
+
+    @media (max-width: 360px) {
+      .main-content { padding-top: 3.25rem; }
+      .theme-toggle, .toggle-sidebar-btn { width: 32px; height: 32px; font-size: 1rem; }
+      .user-message, .ai-response { max-width: 95%; font-size: 0.9rem; }
+    }
+  </style>
+
+  <!-- Full theme CSS (colors, dark mode, code blocks, etc.) - enhances above -->
+  <link rel="stylesheet" href="/stylesheets/index.css?v=<%= Date.now() %>">
   
   <!-- Add required libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
@@ -41,7 +134,7 @@
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">🌓</button>
 
   <!-- Success Alert -->
-  <div class="success-alert" id="successAlert">
+  <div class="success-alert" id="successAlert" style="display:none;opacity:0">
     <div class="success-content">
       <span class="success-icon">✓</span>
       <span class="success-message"></span>
@@ -78,6 +171,9 @@
   <!-- Toggle Button -->
   <button class="toggle-sidebar-btn" id="sidebarToggle">☰</button>
   
+  <!-- Sidebar Overlay (mobile tap-to-dismiss) -->
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
   <!-- Sidebar -->
   <div class="sidebar-container" id="sidebar">
     <div id="pdfList" class="list-group">
@@ -118,7 +214,7 @@
     <div class="action-buttons">
       <% if(user) { %>
         <a href="/chat" class="action-btn newChat">New Chat</a>
-        <a href="/logout" class="action-btn logout">Sign Out</a>
+        <a href="/api/v1/auth/logout" class="action-btn logout">Sign Out</a>
       <% } %>
     </div>
   </div>
@@ -223,11 +319,14 @@
       const alert = document.getElementById('successAlert');
       const messageEl = alert.querySelector('.success-message');
       messageEl.textContent = message;
+      alert.style.display = 'block';
+      alert.style.opacity = '';
       alert.classList.add('show');
       
       // Hide after 3 seconds
       setTimeout(() => {
         alert.classList.remove('show');
+        setTimeout(() => { alert.style.display = 'none'; }, 300);
       }, 3000);
     }
 
@@ -239,7 +338,7 @@
       submitBtn.textContent = 'Uploading...';
       
       try {
-        const res = await fetch('/upload', {
+        const res = await fetch('/api/v1/upload', {
           method: 'POST',
           body: formData
         });
@@ -273,6 +372,6 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   
   <!-- Add main JavaScript file at the end -->
-  <script src="/javascripts/index.js"></script>
+  <script src="/javascripts/index.js?v=<%= Date.now() %>"></script>
 </body>
 </html>

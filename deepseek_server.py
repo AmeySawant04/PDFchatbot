@@ -11,6 +11,9 @@ import sys
 from dotenv import load_dotenv
 import traceback
 
+# Import chunking service
+from services.chunking import ChunkingService, encode_embeddings, decode_embeddings
+
 load_dotenv()  # Add this near the top of your file
 
 sys.stdout.reconfigure(encoding='utf-8') #make output on console error free (mostly)
@@ -100,7 +103,26 @@ def process_pdf():
 
         pdf_data = extract_pdf_info(pdf_path)
 
-        return jsonify({"status": "success", "message": "PDF processed successfully.", "pdf_data": pdf_data})
+        # ── Chunk and embed the extracted text ───────────────────────────
+        chunker = ChunkingService()
+        raw_text = pdf_data["text"]
+        
+        chunks = chunker.chunk_text(raw_text, chunk_size=512, overlap=50)
+        print(f"[Python] Text chunked into {len(chunks)} chunks")
+
+        embeddings = chunker.embed_chunks(chunks)
+        encoded_embeddings = encode_embeddings(embeddings)
+        print(f"[Python] Embeddings generated, encoded size: {len(encoded_embeddings)} chars")
+
+        # Add chunks and embeddings to pdf_data for Node.js to store
+        pdf_data["chunks"] = chunks
+        pdf_data["embeddings"] = encoded_embeddings
+
+        return jsonify({
+            "status": "success", 
+            "message": "PDF processed successfully.", 
+            "pdf_data": pdf_data
+        })
 
     except Exception as e:
         print("[ERROR] Exception in /process route:")
@@ -115,26 +137,9 @@ def ask_question():
         question = request.json.get("question")
         print(f"[INFO] Question: {question}")
 
-        # ollama_response = query_ollama(question)
-
-        # groq_response = query_groq(question)
-
         groq_response = query_multiple_groq(question)
 
-        # deepseek_response = query_deepseek(question)
-
-        # if(deepseek_response.status_code):
-        #     if deepseek_response.status_code != 200:
-        #         print(f"[ERROR] DeepSeek API failed: {deepseek_response.status_code}", deepseek_response.text)
-        #         return jsonify({"answer": "Sorry, DeepSeek API failed to respond properly."}), 500
-
-        # deepseek_answer = deepseek_response.json()["choices"][0]["message"]["content"]
-
-        # return jsonify({"answer": deepseek_answer})
-
         return jsonify({"answer": groq_response})
-    
-        # return jsonify({"answer": ollama_response})
 
     except Exception as e:
         print("[ERROR] Exception in /ask route:")
@@ -153,40 +158,87 @@ def ask_question_target():
 
     print("[Python] Question:", question)
     print("[Python] PDF title:", pdf_data['meta_info']['Title'])
-    print("[Python] PDF content length:", len(pdf_data['text']))
     print("[Python] Chat history length:", len(chat_history))
     print("[Python] Token limits:", token_limits)
 
     try:
-        # Construct context with PDF content and chat history
-        context = f"""
-PDF Content:
-{pdf_data['text']}
+        # ── Semantic search path (new chunked format) ────────────────────
+        chunks = pdf_data.get('chunks', [])
+        embeddings_str = pdf_data.get('embeddings', '')
+
+        if chunks and embeddings_str:
+            print(f"[Python] Using semantic search ({len(chunks)} chunks)")
+            chunker = ChunkingService()
+            
+            # Decode stored embeddings
+            chunk_embeddings = decode_embeddings(embeddings_str)
+            
+            # Find most relevant chunks
+            results = chunker.semantic_search(
+                question, chunk_embeddings, chunks, top_k=5
+            )
+            
+            # Build focused context from top chunks
+            relevant_text = "\n\n---\n\n".join([
+                f"[Chunk {i+1}, relevance: {score:.3f}]\n{chunk['text']}"
+                for i, (chunk, score) in enumerate(results)
+            ])
+            
+            print(f"[Python] Semantic search returned {len(results)} chunks")
+            print(f"[Python] Relevant context length: {len(relevant_text)} chars (vs full text)")
+
+            context = f"""
+PDF Content (most relevant sections):
+{relevant_text}
 
 PDF Metadata:
 Title: {pdf_data['meta_info']['Title']}
-Author: {pdf_data['meta_info']['Author']}
-Pages: {pdf_data['meta_info']['Pages']}
+Author: {pdf_data['meta_info'].get('Author', 'Unknown')}
+Pages: {pdf_data['meta_info'].get('Pages', 'Unknown')}
 
 Previous Conversation:
 {chat_history}
 
 Current Question: {question}
 """
+        else:
+            # ── Fallback: full text path (legacy sessions) ───────────────
+            full_text = pdf_data.get('text', '')
+            print(f"[Python] Using full text fallback ({len(full_text)} chars)")
+            
+            # Truncate if too long to avoid token limits
+            max_text_chars = 30000  # ~7500 tokens
+            if len(full_text) > max_text_chars:
+                full_text = full_text[:max_text_chars] + "\n\n[... text truncated for token limit ...]"
+                print(f"[Python] Text truncated to {max_text_chars} chars")
+
+            context = f"""
+PDF Content:
+{full_text}
+
+PDF Metadata:
+Title: {pdf_data['meta_info']['Title']}
+Author: {pdf_data['meta_info'].get('Author', 'Unknown')}
+Pages: {pdf_data['meta_info'].get('Pages', 'Unknown')}
+
+Previous Conversation:
+{chat_history}
+
+Current Question: {question}
+"""
+
         print("[Python] Context constructed, length:", len(context))
         print("[Python] Calling API...")
         
-        # response = query_deepseek(context, token_limits)
-        # response = query_ollama(context)
-        # response = query_groq(context)
         response = query_multiple_groq(context)
 
-        print("[Python] Got response from DeepSeek")
+        print("[Python] Got response from API")
         print("[Python] Response length:", len(response))
         
         return jsonify({"answer": response})
     except Exception as e:
         print(f"[Python] Error in ask_question_target: {str(e)}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 def query_deepseek(user_question, token_limits=None):
@@ -274,20 +326,7 @@ def query_ollama(prompt, model="llama3.1:8b", stream=False):
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
 
-
-        # Ollama streams chunks if `stream=True`, but returns full text if `stream=False`
-        # result_text = ""
-        # for line in response.iter_lines():
-        #     if line:
-        #         try:
-        #             data = json.loads(line.decode("utf-8"))
-        #             if "response" in data:
-        #                 result_text += data["response"]
-        #         except json.JSONDecodeError:
-        #             continue
-
-        # print("[Python] Received response from Ollama.")
-        # return result_text.strip() or "No response generated."
+        result = response.json()
 
         # Hugging Face sometimes returns a list, sometimes a dict
         if isinstance(result, list) and len(result) > 0:

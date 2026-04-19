@@ -14,7 +14,9 @@
     "start:prod": "NODE_ENV=production node server.js",
     "dev": "concurrently \"npm:server\" \"npm:python\"",
     "server": "nodemon server.js",
-    "python": "python deepseek_server.py"
+    "python": "python deepseek_server.py",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:coverage": "jest --coverage --forceExit --detectOpenHandles"
   },
   "dependencies": {
     "axios": "^1.8.4",
@@ -38,6 +40,17 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "nodemon": "^3.1.9"
+    "jest": "^29.7.0",
+    "mongodb-memory-server": "^10.4.0",
+    "nodemon": "^3.1.9",
+    "supertest": "^7.1.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.js"],
+    "globalSetup": "./tests/setup.js",
+    "globalTeardown": "./tests/teardown.js",
+    "testTimeout": 30000,
+    "verbose": true
   }
 }

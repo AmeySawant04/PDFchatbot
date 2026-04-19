@@ -10,20 +10,30 @@ const {
   handleValidationErrors,
 } = require("../middleware/validators");
 
-// ── Login Page ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// PAGE ROUTES — mounted at "/" in server.js
+// ═══════════════════════════════════════════════════════════════════════════
 
-router.get("/login", (req, res) => {
+const pageRouter = express.Router();
+
+pageRouter.get("/login", (req, res) => {
   res.redirect("/login/0");
 });
 
-router.get("/login/:loginStatus", (req, res) => {
+pageRouter.get("/login/:loginStatus", (req, res) => {
   const loginStatus = req.params.loginStatus;
   res.render("login", { loginStatus });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// API ROUTES — mounted at "/api/v1/auth" in server.js
+// ═══════════════════════════════════════════════════════════════════════════
+
+const apiRouter = express.Router();
+
 // ── Signup ───────────────────────────────────────────────────────────────────
 
-router.post(
+apiRouter.post(
   "/create-user",
   authLimiter,
   signupValidation,
@@ -61,7 +71,7 @@ router.post(
 
 // ── Login ────────────────────────────────────────────────────────────────────
 
-router.post(
+apiRouter.post(
   "/verify-login",
   authLimiter,
   loginValidation,
@@ -91,7 +101,7 @@ router.post(
 
 // ── Logout ───────────────────────────────────────────────────────────────────
 
-router.get("/logout", (req, res) => {
+apiRouter.get("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
     sameSite: "Strict",
@@ -99,4 +109,4 @@ router.get("/logout", (req, res) => {
   res.redirect("/");
 });
 
-module.exports = router;
+module.exports = { pageRouter, apiRouter };

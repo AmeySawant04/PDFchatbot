@@ -1,11 +1,11 @@
 const express = require("express");
-const router = express.Router();
 const multer = require("multer");
 const axios = require("axios");
 const fs = require("fs");
 const { marked } = require("marked");
 const jwt = require("jsonwebtoken");
 const userModel = require("../dbmodels/user");
+const PdfContent = require("../dbmodels/pdfContent");
 const { attachUser, getUserData } = require("../middleware/auth");
 const { askLimiter, uploadLimiter } = require("../middleware/rateLimiter");
 const {
@@ -37,13 +37,24 @@ const upload = multer({
 // Python server URL from env
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:5001";
 
-// ── Chat Page (no session) ──────────────────────────────────────────────────
+// Max active sessions per user (storage optimization)
+const MAX_SESSIONS_PER_USER = 20;
 
-router.get("/", (req, res) => {
+// ═══════════════════════════════════════════════════════════════════════════
+// PAGE ROUTES — mounted at "/" in server.js
+// ═══════════════════════════════════════════════════════════════════════════
+
+const pageRouter = express.Router();
+
+// ── Root redirect ───────────────────────────────────────────────────────────
+
+pageRouter.get("/", (req, res) => {
   res.redirect("/chat");
 });
 
-router.get("/chat", attachUser, async (req, res) => {
+// ── Chat Page (no session) ──────────────────────────────────────────────────
+
+pageRouter.get("/chat", attachUser, async (req, res) => {
   if (!req.userEmail) {
     return res.render("index", {
       user: null,
@@ -72,7 +83,7 @@ router.get("/chat", attachUser, async (req, res) => {
 
 // ── Chat Page (with session) ────────────────────────────────────────────────
 
-router.get("/chat/:sessionId", attachUser, async (req, res) => {
+pageRouter.get("/chat/:sessionId", attachUser, async (req, res) => {
   const sessionId = req.params.sessionId;
 
   if (req.userEmail) {
@@ -132,9 +143,15 @@ router.get("/chat/:sessionId", attachUser, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// API ROUTES — mounted at "/api/v1" in server.js
+// ═══════════════════════════════════════════════════════════════════════════
+
+const apiRouter = express.Router();
+
 // ── Ask Question (no target session — legacy) ───────────────────────────────
 
-router.post(
+apiRouter.post(
   "/ask",
   askLimiter,
   askValidation,
@@ -164,7 +181,7 @@ router.post(
 
 // ── Ask Question (with session) ─────────────────────────────────────────────
 
-router.post(
+apiRouter.post(
   "/ask/:sessionId",
   attachUser,
   askLimiter,
@@ -174,10 +191,21 @@ router.post(
     const { question, chatHistory, tokenLimits } = req.body;
     const sessionId = req.params.sessionId;
 
+    // Server-side chat history clamping (max 20 messages = 10 Q&A pairs)
+    const MAX_HISTORY_MESSAGES = 20;
+    let clampedHistory = chatHistory || [];
+    if (clampedHistory.length > MAX_HISTORY_MESSAGES) {
+      console.warn(
+        `[Chat] Client sent ${clampedHistory.length} history messages, clamping to ${MAX_HISTORY_MESSAGES}`
+      );
+      clampedHistory = clampedHistory.slice(-MAX_HISTORY_MESSAGES);
+    }
+
     try {
       let tempSession;
       let pdfData;
       let email;
+      let pdfContentDoc = null;
 
       if (req.userEmail) {
         // Handle logged-in user
@@ -190,7 +218,22 @@ router.post(
         if (!targetSession) {
           return res.status(404).json({ answer: "Session not found." });
         }
-        pdfData = targetSession.pdfData;
+
+        // Try to fetch from PdfContent collection first (new format)
+        pdfContentDoc = await PdfContent.findOne({ sessionId });
+
+        if (pdfContentDoc) {
+          // New format: use chunks/embeddings from PdfContent
+          pdfData = {
+            meta_info: targetSession.pdfData.meta_info,
+            text: pdfContentDoc.text || "",
+            chunks: pdfContentDoc.chunks || [],
+            embeddings: pdfContentDoc.embeddings || "",
+          };
+        } else {
+          // Legacy format: text stored in user document
+          pdfData = targetSession.pdfData;
+        }
       } else {
         // Handle non-logged in user
         tempSession = req.session[sessionId];
@@ -201,19 +244,25 @@ router.post(
       }
 
       // Format chat history for the prompt
-      const formattedHistory = (chatHistory || [])
+      const formattedHistory = clampedHistory
         .map(
           (msg) =>
             `${msg.role === "user" ? "Human" : "Assistant"}: ${msg.content}`
         )
         .join("\n");
 
-      const pythonRes = await axios.post(`${PYTHON_API_URL}/ask-target`, {
+      // Build payload for Python server
+      const pythonPayload = {
         question,
         pdfData,
         chatHistory: formattedHistory,
         tokenLimits,
-      });
+      };
+
+      const pythonRes = await axios.post(
+        `${PYTHON_API_URL}/ask-target`,
+        pythonPayload
+      );
 
       if (pythonRes.data && pythonRes.data.answer) {
         const timestamp = new Date();
@@ -235,6 +284,14 @@ router.post(
               $set: { "session.$.lastInteraction": timestamp },
             }
           );
+
+          // Update PdfContent updatedAt to reset TTL
+          if (pdfContentDoc) {
+            await PdfContent.updateOne(
+              { sessionId },
+              { $set: { updatedAt: timestamp } }
+            );
+          }
         } else {
           // Update session for non-logged in user
           if (!tempSession.interaction) {
@@ -258,7 +315,7 @@ router.post(
 
 // ── Upload PDF ──────────────────────────────────────────────────────────────
 
-router.post(
+apiRouter.post(
   "/upload",
   attachUser,
   uploadLimiter,
@@ -304,14 +361,32 @@ router.post(
         Date.now().toString(36) + Math.random().toString(36).substring(2);
 
       if (req.userEmail) {
+        // Enforce session cap
+        const user = await userModel.findOne({ email: req.userEmail });
+        if (user && user.session && user.session.length >= MAX_SESSIONS_PER_USER) {
+          return res.status(400).json({
+            error: `Maximum ${MAX_SESSIONS_PER_USER} active sessions allowed. Please delete an old session first.`,
+          });
+        }
+
+        // 1. Create PdfContent document in separate collection
+        const pdfContentDoc = await PdfContent.create({
+          sessionId,
+          userId: user._id,
+          text: pdfData.text,
+          chunks: pdfData.chunks || [],
+          embeddings: pdfData.embeddings || "",
+        });
+
+        // 2. Add session to user doc with ObjectId reference (no text stored here)
         const updatedUser = await userModel.findOneAndUpdate(
           { email: req.userEmail },
           {
             $push: {
               session: {
                 sessionId,
+                pdfContent: pdfContentDoc._id,
                 pdfData: {
-                  text: pdfData.text,
                   meta_info: {
                     Title: pdfData.meta_info.Title,
                     Author: pdfData.meta_info.Author,
@@ -327,6 +402,8 @@ router.post(
         );
 
         if (!updatedUser) {
+          // Rollback PdfContent if user not found
+          await PdfContent.deleteOne({ _id: pdfContentDoc._id });
           return res.status(404).json({ error: "User not found" });
         }
 
@@ -368,7 +445,7 @@ router.post(
 
 // ── Rename Session ──────────────────────────────────────────────────────────
 
-router.post(
+apiRouter.post(
   "/rename/:sessionId",
   attachUser,
   async (req, res) => {
@@ -402,4 +479,34 @@ router.post(
   }
 );
 
-module.exports = router;
+// ── Delete Session ──────────────────────────────────────────────────────────
+
+apiRouter.delete(
+  "/session/:sessionId",
+  attachUser,
+  async (req, res) => {
+    const sessionId = req.params.sessionId;
+
+    if (!req.userEmail) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      // Remove PdfContent document
+      await PdfContent.deleteOne({ sessionId });
+
+      // Remove session from user document
+      await userModel.updateOne(
+        { email: req.userEmail },
+        { $pull: { session: { sessionId } } }
+      );
+
+      res.status(200).json({ message: "Session deleted successfully" });
+    } catch (e) {
+      console.error("[Session] Error deleting:", e.message);
+      res.status(500).json({ error: "Failed to delete session" });
+    }
+  }
+);
+
+module.exports = { pageRouter, apiRouter };

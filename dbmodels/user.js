@@ -29,10 +29,16 @@ const sessionSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    // Reference to PdfContent collection (stores text, chunks, embeddings)
+    pdfContent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PdfContent",
+    },
     pdfData: {
+      // text is kept optional for backward compat during migration
+      // New sessions will NOT store text here — it goes to PdfContent
       text: {
         type: String,
-        required: true,
       },
       meta_info: {
         Title: {
