@@ -50,7 +50,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # Note: pdf_data is now returned from extract_pdf_info() rather than
 # stored as global mutable state (which caused concurrency bugs).
 
-def determine_pdf_title(metadata, text):
+def determine_pdf_title(metadata, text, original_filename=""):
     # 1. Check metadata title
     title = metadata.get("Title", "").strip()
     if title and title.lower() != "unknown":
@@ -59,11 +59,20 @@ def determine_pdf_title(metadata, text):
     # 2. Fallback: use the first non-empty line of actual PDF content
     for line in text.splitlines():
         clean_line = line.strip()
-        if clean_line:
-            return clean_line[:80]  # optional: limit title length
+        if clean_line and len(clean_line) > 3:
+            return clean_line[:80]
+
+    # 3. Fallback: use the uploaded filename (strip extension)
+    if original_filename:
+        name = os.path.splitext(original_filename)[0]
+        # Clean up underscores/hyphens into spaces, title-case
+        name = name.replace('_', ' ').replace('-', ' ').strip()
+        if name:
+            return name[:80]
+
     return "Untitled PDF"
 
-def extract_pdf_info(pdf_path):
+def extract_pdf_info(pdf_path, original_filename=""):
     """Extract text, metadata, and OCR content from a PDF file.
     Returns a new dict each call (no global state)."""
     print("[Python] Pdf Path:", pdf_path)
@@ -118,9 +127,7 @@ def extract_pdf_info(pdf_path):
 
                             if results:
                                 ocr_text = ' '.join(results)
-                                ocr_texts.append(
-                                    f"[Image on page {page_num + 1}]: {ocr_text}"
-                                )
+                                ocr_texts.append(ocr_text)
                         except Exception as img_err:
                             print(f"[OCR] Skipping image on page {page_num + 1}: {img_err}")
                             continue
@@ -132,12 +139,15 @@ def extract_pdf_info(pdf_path):
             if ocr_texts:
                 print(f"[OCR] Extracted text from {len(ocr_texts)} images")
                 combined_ocr = "\n\n".join(ocr_texts)
-                text = text + "\n\n--- OCR Extracted Content ---\n\n" + combined_ocr
+                # Determine title BEFORE appending OCR (use text-layer content)
+                text_for_title = text
+                text = text + "\n\n" + combined_ocr
             else:
                 print("[OCR] No images with extractable text found")
+                text_for_title = text
 
         pdf_data["text"] = text
-        pdf_data["meta_info"]["Title"] = determine_pdf_title(metadata, text)
+        pdf_data["meta_info"]["Title"] = determine_pdf_title(metadata, text_for_title, original_filename)
         pdf_data["meta_info"]["Author"] = metadata.get("Author", "Unknown")
         pdf_data["meta_info"]["Pages"] = page_count
 
@@ -163,13 +173,16 @@ def process_pdf():
     try:
         data = request.json
         pdf_path = data.get('pdf_path')
+        original_filename = data.get('original_filename', '')
 
         print(f"[INFO] PDF path received: {pdf_path}")
+        if original_filename:
+            print(f"[INFO] Original filename: {original_filename}")
 
         if not pdf_path or not os.path.exists(pdf_path):
             return jsonify({"status": "error", "message": "Invalid or missing PDF path"}), 400
 
-        pdf_data = extract_pdf_info(pdf_path)
+        pdf_data = extract_pdf_info(pdf_path, original_filename)
 
         # ── Chunk and embed the extracted text ───────────────────────────
         chunker = ChunkingService()
@@ -279,28 +292,26 @@ def ask_question_target():
                 question, chunk_embeddings, chunks, top_k=5
             )
             
-            # Build focused context from top chunks
-            relevant_text = "\n\n---\n\n".join([
-                f"[Chunk {i+1}, relevance: {score:.3f}]\n{chunk['text']}"
-                for i, (chunk, score) in enumerate(results)
+            # Build focused context from top chunks (clean, no debug labels)
+            relevant_text = "\n\n".join([
+                chunk['text']
+                for chunk, score in results
             ])
             
             print(f"[Python] Semantic search returned {len(results)} chunks")
             print(f"[Python] Relevant context length: {len(relevant_text)} chars (vs full text)")
 
-            context = f"""
-PDF Content (most relevant sections):
-{relevant_text}
-
-PDF Metadata:
-Title: {pdf_data['meta_info']['Title']}
+            context = f"""Document: {pdf_data['meta_info']['Title']}
 Author: {pdf_data['meta_info'].get('Author', 'Unknown')}
 Pages: {pdf_data['meta_info'].get('Pages', 'Unknown')}
 
-Previous Conversation:
+Content:
+{relevant_text}
+
+Conversation so far:
 {chat_history}
 
-Current Question: {question}
+Question: {question}
 """
         else:
             # ── Fallback: full text path (legacy sessions) ───────────────
@@ -313,19 +324,17 @@ Current Question: {question}
                 full_text = full_text[:max_text_chars] + "\n\n[... text truncated for token limit ...]"
                 print(f"[Python] Text truncated to {max_text_chars} chars")
 
-            context = f"""
-PDF Content:
-{full_text}
-
-PDF Metadata:
-Title: {pdf_data['meta_info']['Title']}
+            context = f"""Document: {pdf_data['meta_info']['Title']}
 Author: {pdf_data['meta_info'].get('Author', 'Unknown')}
 Pages: {pdf_data['meta_info'].get('Pages', 'Unknown')}
 
-Previous Conversation:
+Content:
+{full_text}
+
+Conversation so far:
 {chat_history}
 
-Current Question: {question}
+Question: {question}
 """
 
         print("[Python] Context constructed, length:", len(context))
@@ -519,7 +528,18 @@ def query_multiple_groq(prompt, token_limits=None):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful AI assistant specialized in analyzing and summarizing PDF content."
+            "content": (
+                "You are an expert PDF assistant. You have full access to the document's content. "
+                "Answer questions directly and confidently based on what the document contains. "
+                "Rules:\n"
+                "- Be direct and assertive. Do NOT say 'the content extracted from the PDF mentions' or similar hedging.\n"
+                "- Speak as if you have read the document yourself. Say 'The document explains...' or 'According to this PDF...' or just state the answer directly.\n"
+                "- Never expose internal processing details like chunk numbers, relevance scores, OCR labels, or image tags.\n"
+                "- If the document contains images with text (e.g., screenshots, diagrams, tables), describe their purpose naturally without mentioning OCR or extraction.\n"
+                "- If you are unsure, say so briefly — do not over-hedge with 'likely', 'appears to be', 'seems like' on every sentence.\n"
+                "- Use markdown formatting for code blocks, lists, and emphasis when helpful.\n"
+                "- Keep responses concise but thorough."
+            )
         },
         {"role": "user", "content": prompt}
     ]

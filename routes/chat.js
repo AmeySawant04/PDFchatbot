@@ -342,6 +342,7 @@ apiRouter.post(
     try {
       const pythonResponse = await axios.post(`${PYTHON_API_URL}/process`, {
         pdf_path: filePath,
+        original_filename: req.file.originalname || "",
       });
 
       // Clean up uploaded file
